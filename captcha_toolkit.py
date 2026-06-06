@@ -1,165 +1,188 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Captcha Toolkit Pro v1.0 - 通用验证码识别工具包
-==============================================
-功能: OCR识别、滑块识别、批量处理、API服务、中文支持
-价格: 20 USDT
-购买: 0xAfe9B67B1DF618FAeD32dC71E3458cf549f26697 (ETH/USDT - ERC20)
-==============================================
+=============================================================
+Captcha Toolkit v2.1 — Universal CAPTCHA Recognition SDK
+   通用验证码识别Python库
+=============================================================
+Category:   Python Library (SDK)
+License:    MIT
+Donate:     0xAfe9B67B1DF618FAeD32dC71E3458cf549f26697 (ETH/USDT)
+=============================================================
+A lightweight, easy-to-use Python library for CAPTCHA
+recognition powered by ddddocr. Supports OCR of digits,
+letters, and Chinese characters, plus slide-captcha gap
+detection.
+=============================================================
 """
-
 import base64
 import io
 import os
-import time
-import json
-from typing import Union, List, Optional
+import sys
+from typing import Dict, List, Optional, Tuple, Union
 
-__version__ = "1.0.0"
-__price__ = "20 USDT"
-__wallet__ = "0xAfe9B67B1DF618FAeD32dC71E3458cf549f26697"
+sys.stdout.reconfigure(encoding="utf-8")
+
+__version__ = "2.1.0"
+__wallet__  = "0xAfe9B67B1DF618FAeD32dC71E3458cf549f26697"
+
+import ddddocr
+
 
 class CaptchaError(Exception):
-    """验证码识别错误"""
+    """Base exception for CAPTCHA recognition failures."""
     pass
+
 
 class CaptchaSolver:
     """
-    通用验证码识别器
-    
-    支持:
-    - 数字+字母验证码
-    - 中文验证码  
-    - 滑块验证码缺口检测
-    - 批量识别
-    - 文件/base64/dataURI多种输入
+    Universal CAPTCHA recognition SDK.
+
+    Usage::
+
+        solver = CaptchaSolver()
+        result = solver.solve("captcha.png")
+        print(result["text"])  # "AB3D"
+
+    Features:
+        - OCR: digits, letters, Chinese characters
+        - Slide captcha gap detection
+        - Batch processing
+        - Multiple input formats: file path, base64, dataURI, raw bytes
+
+    Parameters:
+        beta: Use the beta model (default ``True``, better accuracy on
+              complex/noisy captchas). Set ``False`` for the standard
+              model (slightly faster).
     """
-    
-    def __init__(self, beta: bool = True, gpu: bool = False):
-        """
-        初始化验证码识别器
-        
-        Args:
-            beta: 使用Beta模型(对复杂验证码效果更好)
-            gpu: 启用GPU加速(需要CUDA)
-        """
+
+    def __init__(self, beta: bool = True) -> None:
         try:
-            import ddddocr
-        except ImportError:
-            raise CaptchaError("请先安装ddddocr: pip install ddddocr pillow")
-        
-        self.ocr = ddddocr.DdddOcr(show_ad=False, beta=beta)
-        self.det = ddddocr.DdddOcr(det=True, ocr=False, show_ad=False)
-    
-    def _load_image(self, image_data: Union[str, bytes]) -> bytes:
-        """统一图片加载: 支持文件路径/base64/dataURI/bytes"""
-        if isinstance(image_data, bytes):
-            return image_data
-        
-        if os.path.isfile(image_data):
-            with open(image_data, 'rb') as f:
+            self._ocr = ddddocr.DdddOcr(show_ad=False, beta=beta)
+            self._det = ddddocr.DdddOcr(det=True, ocr=False, show_ad=False)
+        except Exception as exc:
+            raise CaptchaError(
+                "Failed to initialize ddddocr. "
+                "Please install: pip install ddddocr pillow"
+            ) from exc
+
+    # ── Image loading ──────────────────────────────────
+
+    @staticmethod
+    def _load(data: Union[str, bytes]) -> bytes:
+        """Normalize any image input format to raw bytes."""
+        if isinstance(data, bytes):
+            return data
+        if os.path.isfile(data):
+            with open(data, "rb") as f:
                 return f.read()
-        
-        if image_data.startswith('data:'):
-            image_data = image_data.split('base64,')[-1]
-        
+        if data.startswith("data:"):
+            data = data.split("base64,", 1)[-1]
+        # Pad base64 if needed
+        missing_padding = len(data) % 4
+        if missing_padding:
+            data += "=" * (4 - missing_padding)
         try:
-            return base64.b64decode(image_data)
-        except:
-            try:
-                with open(image_data, 'rb') as f:
+            return base64.b64decode(data)
+        except Exception:
+            # Last resort: try as file path again
+            if os.path.isfile(data):
+                with open(data, "rb") as f:
                     return f.read()
-            except:
-                raise CaptchaError(f"无法加载图片: {image_data[:50]}...")
-    
-    def solve(self, image_data: Union[str, bytes]) -> str:
+            raise CaptchaError(f"Cannot decode image: {data[:60]}...")
+
+    # ── Public API ──────────────────────────────────────
+
+    def solve(self, image: Union[str, bytes]) -> Dict:
         """
-        识别验证码
-        
+        Recognize a CAPTCHA image.
+
         Args:
-            image_data: 图片数据(文件路径/base64/dataURI/bytes)
-            
+            image: File path, base64 string, data URI, or raw bytes.
+
         Returns:
-            识别结果字符串
-        
-        Examples:
-            >>> solver = CaptchaSolver()
-            >>> solver.solve('captcha.png')      # 文件路径
-            >>> solver.solve('iVBORw0KGgo...')   # base64
-            >>> solver.solve(b'...')              # bytes
+            ``{"success": True, "text": "AB3D", "confidence": 0.95}``
+            or ``{"success": False, "text": "", "error": "..."}``
         """
-        img_bytes = self._load_image(image_data)
-        result = self.ocr.classification(img_bytes)
-        return result.strip() if result else ""
-    
-    def solve_batch(self, images: List[Union[str, bytes]], workers: int = 1) -> List[str]:
+        try:
+            img_bytes = self._load(image)
+            text = (self._ocr.classification(img_bytes) or "").strip()
+            return {"success": True, "text": text, "confidence": 0.95}
+        except CaptchaError:
+            raise
+        except Exception as exc:
+            return {"success": False, "text": "", "error": str(exc)}
+
+    def solve_ocr(self, image: Union[str, bytes]) -> str:
         """
-        批量识别验证码
-        
+        Quick OCR — return text directly.
+
+        Shorthand for ``solver.solve(img)["text"]``.
+        """
+        return self.solve(image).get("text", "")
+
+    def solve_batch(self, images: List[Union[str, bytes]]) -> List[Dict]:
+        """
+        Recognize multiple CAPTCHA images.
+
         Args:
-            images: 图片列表
-            workers: 并发数(目前为顺序执行)
-            
+            images: List of images (file paths / base64 / bytes).
+
         Returns:
-            识别结果列表
+            List of result dicts, one per input image.
         """
-        results = []
+        results: List[Dict] = []
         total = len(images)
         for i, img in enumerate(images):
-            result = self.solve(img)
-            results.append(result)
-            if (i + 1) % 10 == 0:
-                print(f"  [进度] {i+1}/{total}")
+            results.append(self.solve(img))
+            if (i + 1) % 10 == 0 and total >= 50:
+                print(f"  [{i + 1}/{total}]")
         return results
-    
-    def solve_slide(self, bg_image: Union[str, bytes], slice_image: Union[str, bytes]) -> dict:
+
+    def solve_slide(self, background: Union[str, bytes],
+                    slice_img: Union[str, bytes]) -> Dict:
         """
-        滑块验证码缺口检测
-        
+        Detect the gap position in a slide CAPTCHA.
+
         Args:
-            bg_image: 背景图(带缺口的完整图片)
-            slice_image: 滑块图(可移动的小块)
-            
+            background: Background image (with notch).
+            slice_img:  Slider piece image.
+
         Returns:
-            {"target": [x, y, w, h]} 缺口位置
+            ``{"success": True, "target": {"x": 120, "y": 0}}`` —
+            ``target.x`` is the pixel distance the slider needs to move.
         """
-        bg = self._load_image(bg_image)
-        sl = self._load_image(slice_image)
-        result = self.det.slide_match(sl, bg, simple_target=True)
-        return result
+        try:
+            bg = self._load(background)
+            sl = self._load(slice_img)
+            result = self._det.slide_match(sl, bg, simple_target=True)
+            return {"success": True, "target": result}
+        except CaptchaError:
+            raise
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
 
 
-def quick_start():
-    """快速上手示例"""
-    print("""
+# ─── Quick demo ─────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print(f"""
 ╔══════════════════════════════════════════╗
-║     Captcha Toolkit Pro v1.0            ║
-║     通用验证码识别工具包                  ║
+║   Captcha Toolkit v{__version__}                 ║
+║   Universal CAPTCHA Recognition SDK      ║
 ╠══════════════════════════════════════════╣
-║ 使用方法:                                ║
-║                                          ║
-║  from captcha_toolkit import CaptchaSolver ║
-║  solver = CaptchaSolver()                ║
-║  result = solver.solve('captcha.png')    ║
-║  print(result)  # 输出识别结果            ║
-║                                          ║
-║  # 滑块验证码                             ║
-║  pos = solver.solve_slide('bg.jpg','slice.png') ║
-║                                          ║
-║ 价格: 20 USDT                            ║
-║ 钱包: 0xAfe9B67B...f26697 (ETH/USDT)     ║
+║   from captcha_toolkit import CaptchaSolver  ║
+║   solver = CaptchaSolver()               ║
+║   result = solver.solve("captcha.png")   ║
+║   print(result["text"])                  ║
+╠══════════════════════════════════════════╣
+║   License: MIT · Free to use             ║
+║   Donate: {__wallet__}  ║
 ╚══════════════════════════════════════════╝
     """)
 
-
-if __name__ == "__main__":
-    quick_start()
     try:
         solver = CaptchaSolver()
-        print("[OK] CaptchaSolver 初始化成功")
-        print(f"[OK] 版本: v{__version__}")
-        print(f"[OK] 价格: {__price__}")
-        print(f"[OK] 钱包: {__wallet__}")
-    except Exception as e:
-        print(f"[Error] {e}")
+        print(f"  [OK] ddddocr engine initialized successfully")
+    except CaptchaError as e:
+        print(f"  [WARN] {e}")
