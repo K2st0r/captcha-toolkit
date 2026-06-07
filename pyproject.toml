@@ -1,4 +1,4 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.backends._legacy:_Backend"
 
@@ -21,11 +21,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 dependencies = [
-    "ddddocr>=2.0.0",
+    "ddddocr>=1.6.1,<2.0",
     "pillow>=10.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/K2st0r/captcha-toolkit"
 Repository = "https://github.com/K2st0r/captcha-toolkit"
-Donate = "https://github.com/K2st0r/captcha-toolkit#donate--打赏"
+Donate = "https://github.com/K2st0r/captcha-toolkit#donate--鎵撹祻"
