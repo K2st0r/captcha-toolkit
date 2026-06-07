@@ -93,12 +93,13 @@ class CaptchaSolver:
 
     # ── Public API ──────────────────────────────────────
 
-    def solve(self, image: Union[str, bytes]) -> Dict:
+    def solve(self, image: Union[str, bytes], probability: bool = False) -> Dict:
         """
         Recognize a CAPTCHA image.
 
         Args:
             image: File path, base64 string, data URI, or raw bytes.
+            probability: If True, returns character-level probability info.
 
         Returns:
             ``{"success": True, "text": "AB3D", "confidence": 0.95}``
@@ -106,8 +107,16 @@ class CaptchaSolver:
         """
         try:
             img_bytes = self._load(image)
+            if probability:
+                result = self._ocr.classification(img_bytes, probability=True)
+                if isinstance(result, dict):
+                    text = result.get('text', '')
+                    prob = result.get('probability', {})
+                    avg_conf = sum(prob.values()) / len(prob) if prob else 0.0
+                    return {"success": True, "text": text, "confidence": round(avg_conf, 3), "details": result}
             text = (self._ocr.classification(img_bytes) or "").strip()
-            return {"success": True, "text": text, "confidence": 0.95}
+            confidence = 1.0 if text else 0.0
+            return {"success": bool(text), "text": text, "confidence": confidence}
         except CaptchaError:
             raise
         except Exception as exc:
